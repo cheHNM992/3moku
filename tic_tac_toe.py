@@ -1,79 +1,159 @@
 import random
+from collections import defaultdict
 
-gameBoard = [0,1,2,3,4,5,6,7,8] # ゲームに利用する盤面
+WIN_LINES = [
+    (0, 1, 2),
+    (3, 4, 5),
+    (6, 7, 8),
+    (0, 3, 6),
+    (1, 4, 7),
+    (2, 5, 8),
+    (0, 4, 8),
+    (2, 4, 6),
+]
 
-# 盤面を3x3で表示する
-def displayBoard():
-    # gameBoardの要素を1つずつ表示
-    print("--+---+--") # デコレーション
-    for i in range(0, len(gameBoard)):
-        if(i%3 == 2): # 3回に1回は改行
-            print(gameBoard[i]) # 改行する
-            print("--+---+--") # デコレーション
 
-        elif(i%3 == 1):
-            print(" | " + str(gameBoard[i]) + " | ", end="") # 改行しない
-        else :
-            print(gameBoard[i], end="") # 改行しない
+def display_board(board):
+    cells = []
+    for idx, v in enumerate(board):
+        cells.append(str(idx) if v == " " else v)
+    print("--+---+--")
+    for i in range(0, 9, 3):
+        print(f"{cells[i]} | {cells[i+1]} | {cells[i+2]}")
+        print("--+---+--")
 
-    print()
 
-# ターンを進める
-def inputBoard(playerType):
-    # 1.座標を入力させる
-    if(playerType == "o"):  # o が渡されたら座標を入力
-        tgt = int(input("0~8の座標を入れてください: "))
-    else: # xが渡されたらランダムで座標を入力
-        tgt = random.randint(0,8)
+def empty_cells(board):
+    return [i for i, v in enumerate(board) if v == " "]
 
-    # 2.入力座標に 'o'か 'x' が入っていないことを確認
-    if(gameBoard[tgt] == 'o' or gameBoard[tgt] == 'x'):
-        inputBoard(playerType)
 
-    # 3.gameBoardに反映
-    else:
-        gameBoard[tgt] = playerType
-
-# 勝利判定
-def winner():
-    # 勝ち手を列挙
-    lines = [
-      [0, 1, 2],
-      [3, 4, 5],
-      [6, 7, 8],
-      [0, 3, 6],
-      [1, 4, 7],
-      [2, 5, 8],
-      [0, 4, 8],
-      [2, 4, 6],
-    ]
-    # forで勝ち手を1パターンずつ見ていく
-    for i in range(0, len(lines)):
-        [a, b, c] = lines[i]
-        # 勝ち手の場所に同じ記号が入っていないかを確認
-        if gameBoard[a] and gameBoard[a] == gameBoard[b] and gameBoard[a] == gameBoard[c]: 
-            # 同じ記号が入っていたら、入っている記号を返す
-            return gameBoard[a]
-    # どちらも勝っていない場合はNoneを返す
+def check_winner(board):
+    for a, b, c in WIN_LINES:
+        if board[a] != " " and board[a] == board[b] == board[c]:
+            return board[a]
     return None
 
-displayBoard() # 実行時に初めに表示される盤面
-# ゲームを実行する
-for turn in range(0,9):
-    # 誰のターンかを判定する
-    if(turn %2 == 0) : # あなたのターン
-        print("You")
-        inputBoard("o")
-    else: # CPUのターン
-        print("CPU")
-        inputBoard("x")
-    
-    displayBoard() # 盤面表示
 
-    if winner(): # 勝敗判定
-        print(winner() + "の勝ち")
-        break
+def is_full(board):
+    return all(v != " " for v in board)
 
-    if turn == 8: # 8手目で引き分け
-        print("引き分け")
-        break
+
+class SelfPlayAgent:
+    def __init__(self, alpha=0.2, gamma=0.9, epsilon=0.2):
+        self.q = defaultdict(lambda: defaultdict(float))
+        self.alpha = alpha
+        self.gamma = gamma
+        self.epsilon = epsilon
+
+    def encode_state(self, board, player):
+        opponent = "O" if player == "X" else "X"
+        encoded = []
+        for v in board:
+            if v == player:
+                encoded.append("P")
+            elif v == opponent:
+                encoded.append("E")
+            else:
+                encoded.append("_")
+        return tuple(encoded)
+
+    def choose_action(self, board, player, explore=True):
+        state = self.encode_state(board, player)
+        moves = empty_cells(board)
+        if explore and random.random() < self.epsilon:
+            return random.choice(moves), state
+        values = self.q[state]
+        best = max(moves, key=lambda m: values.get(m, 0.0))
+        return best, state
+
+    def update(self, state, action, reward, next_state, done):
+        values = self.q[state]
+        old = values.get(action, 0.0)
+        if done:
+            target = reward
+        else:
+            next_values = self.q[next_state]
+            next_best = max(next_values.values()) if next_values else 0.0
+            target = reward - self.gamma * next_best
+        values[action] = old + self.alpha * (target - old)
+
+    def train(self, episodes=40000):
+        for episode in range(episodes):
+            board = [" "] * 9
+            player = "X" if episode % 2 == 0 else "O"
+            while True:
+                action, state = self.choose_action(board, player, explore=True)
+                board[action] = player
+                winner = check_winner(board)
+                done = bool(winner) or is_full(board)
+                reward = 1.0 if winner == player else 0.0
+                if done:
+                    self.update(state, action, reward, None, True)
+                    break
+                next_player = "O" if player == "X" else "X"
+                next_state = self.encode_state(board, next_player)
+                self.update(state, action, reward, next_state, False)
+                player = next_player
+
+    def best_move(self, board, player):
+        action, _ = self.choose_action(board, player, explore=False)
+        return action
+
+
+def human_move(board, player):
+    while True:
+        try:
+            tgt = int(input("0~8の空いている座標を入力してください: ").strip())
+        except ValueError:
+            print("数字で入力してください。")
+            continue
+        if tgt not in range(9):
+            print("0~8の範囲で入力してください。")
+            continue
+        if board[tgt] != " ":
+            print("そのマスは埋まっています。別の場所を選んでください。")
+            continue
+        board[tgt] = player
+        return
+
+
+def play_against_agent(agent, episodes):
+    print(f"自己対戦で{episodes}ゲーム学習中...")
+    agent.train(episodes)
+    print("学習完了。コンピュータと対戦できます。")
+
+    human = "O"
+    cpu = "X"
+
+    while True:
+        board = [" "] * 9
+        first = input("先手を打ちますか？(y/n): ").strip().lower() == "y"
+        current = human if first else cpu
+        display_board(board)
+        while True:
+            if current == human:
+                print("あなたの番 (O)")
+                human_move(board, human)
+            else:
+                move = agent.best_move(board, cpu)
+                print(f"コンピュータの番 (X) -> {move}")
+                board[move] = cpu
+
+            display_board(board)
+            win = check_winner(board)
+            if win:
+                print(f"{win} の勝ち")
+                break
+            if is_full(board):
+                print("引き分け")
+                break
+            current = human if current == cpu else cpu
+
+        retry = input("もう一度プレイしますか？(y/n): ").strip().lower()
+        if retry != "y":
+            break
+
+
+if __name__ == "__main__":
+    agent = SelfPlayAgent()
+    play_against_agent(agent, episodes=30000)
