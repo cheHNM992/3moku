@@ -1,5 +1,7 @@
+import pickle
 import random
 from collections import defaultdict
+from pathlib import Path
 
 WIN_LINES = [
     (0, 1, 2),
@@ -11,6 +13,7 @@ WIN_LINES = [
     (0, 4, 8),
     (2, 4, 6),
 ]
+Q_TABLE_PATH = Path(__file__).with_name("q_table.pkl")
 
 
 def display_board(board):
@@ -40,7 +43,7 @@ def is_full(board):
 
 class SelfPlayAgent:
     def __init__(self, alpha=0.2, gamma=0.9, epsilon=0.2):
-        self.q = defaultdict(lambda: defaultdict(float))
+        self.q = defaultdict(dict)
         self.alpha = alpha
         self.gamma = gamma
         self.epsilon = epsilon
@@ -77,7 +80,19 @@ class SelfPlayAgent:
             target = reward - self.gamma * next_best
         values[action] = old + self.alpha * (target - old)
 
-    def train(self, episodes=40000):
+    def load(self, path):
+        if not path.exists():
+            return False
+        with path.open("rb") as fh:
+            data = pickle.load(fh)
+        self.q = defaultdict(dict, data)
+        return True
+
+    def save(self, path):
+        with path.open("wb") as fh:
+            pickle.dump(dict(self.q), fh)
+
+    def train(self, episodes=30000):
         for episode in range(episodes):
             board = [" "] * 9
             player = "X" if episode % 2 == 0 else "O"
@@ -118,9 +133,14 @@ def human_move(board, player):
 
 
 def play_against_agent(agent, episodes):
-    print(f"自己対戦で{episodes}ゲーム学習中...")
-    agent.train(episodes)
-    print("学習完了。コンピュータと対戦できます。")
+    loaded = agent.load(Q_TABLE_PATH)
+    if loaded:
+        print("保存済みの学習結果を読み込みました。")
+    else:
+        print(f"自己対戦で{episodes}ゲーム学習中...")
+        agent.train(episodes)
+        agent.save(Q_TABLE_PATH)
+        print("学習完了。コンピュータと対戦できます。")
 
     human = "O"
     cpu = "X"
